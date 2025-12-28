@@ -1,59 +1,339 @@
-<div>Teachable Machine Image Model</div>
-<button type="button" onclick="init()">Start</button>
-<div id="webcam-container"></div>
-<div id="label-container"></div>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
-<script type="text/javascript">
-    // More API functions here:
-    // https://github.com/googlecreativelab/teachablemachine-community/tree/master/libraries/image
-
-    // the link to your model provided by Teachable Machine export panel
-    const URL = "./my_model/";
-
-    let model, webcam, labelContainer, maxPredictions;
-
-    // Load the image model and setup the webcam
-    async function init() {
-        const modelURL = URL + "model.json";
-        const metadataURL = URL + "metadata.json";
-
-        // load the model and metadata
-        // Refer to tmImage.loadFromFiles() in the API to support files from a file picker
-        // or files from your local hard drive
-        // Note: the pose library adds "tmImage" object to your window (window.tmImage)
-        model = await tmImage.load(modelURL, metadataURL);
-        maxPredictions = model.getTotalClasses();
-
-        // Convenience function to setup a webcam
-        const flip = true; // whether to flip the webcam
-        webcam = new tmImage.Webcam(200, 200, flip); // width, height, flip
-        await webcam.setup(); // request access to the webcam
-        await webcam.play();
-        window.requestAnimationFrame(loop);
-
-        // append elements to the DOM
-        document.getElementById("webcam-container").appendChild(webcam.canvas);
-        labelContainer = document.getElementById("label-container");
-        for (let i = 0; i < maxPredictions; i++) { // and class labels
-            labelContainer.appendChild(document.createElement("div"));
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>植物健康 AI 診斷師</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        /* --- 基礎設定 --- */
+        :root {
+            --primary-green: #2d6a4f;
+            --light-green: #d8f3dc;
+            --accent-green: #40916c;
+            --text-color: #1b4332;
+            --bg-gradient: linear-gradient(135deg, #1b4332 0%, #52b788 100%);
         }
-    }
 
-    async function loop() {
-        webcam.update(); // update the webcam frame
-        await predict();
-        window.requestAnimationFrame(loop);
-    }
-
-    // run the webcam image through the image model
-    async function predict() {
-        // predict can take in an image, video or canvas html element
-        const prediction = await model.predict(webcam.canvas);
-        for (let i = 0; i < maxPredictions; i++) {
-            const classPrediction =
-                prediction[i].className + ": " + prediction[i].probability.toFixed(2);
-            labelContainer.childNodes[i].innerHTML = classPrediction;
+        body {
+            font-family: 'Poppins', 'Noto Sans TC', sans-serif;
+            margin: 0;
+            min-height: 100vh;
+            background: var(--bg-gradient);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--text-color);
+            position: relative;
+            overflow-x: hidden;
         }
-    }
-</script>
+
+        /* --- 背景裝飾 (抽象葉子) --- */
+        .leaf-bg {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50% 0 50% 0;
+            z-index: 0;
+        }
+        .leaf-1 { width: 300px; height: 300px; top: -50px; left: -50px; transform: rotate(45deg); }
+        .leaf-2 { width: 200px; height: 200px; bottom: 50px; right: -50px; transform: rotate(15deg); }
+
+        /* --- 主卡片容器 --- */
+        .main-card {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 2rem;
+            border-radius: 24px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            width: 90%;
+            max-width: 500px;
+            text-align: center;
+            z-index: 10;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        h1 {
+            color: var(--primary-green);
+            margin-bottom: 0.5rem;
+            font-size: 1.8rem;
+        }
+
+        p.subtitle {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+        }
+
+        /* --- 啟動按鈕 --- */
+        .start-btn {
+            background: var(--primary-green);
+            color: white;
+            border: none;
+            padding: 12px 32px;
+            font-size: 1.1rem;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(45, 106, 79, 0.3);
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .start-btn:hover {
+            background: var(--accent-green);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(45, 106, 79, 0.4);
+        }
+
+        /* --- 攝影機區域 --- */
+        #webcam-container {
+            margin: 20px auto;
+            border-radius: 16px;
+            overflow: hidden;
+            width: 200px;
+            height: 200px;
+            background: #f0fdf4;
+            display: flex; /* 初始未啟動時居中 */
+            align-items: center;
+            justify-content: center;
+            border: 4px solid var(--light-green);
+            position: relative;
+        }
+        
+        #webcam-container canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* 掃描線動畫 */
+        .scan-line {
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            background: rgba(45, 255, 196, 0.8);
+            box-shadow: 0 0 4px rgba(45, 255, 196, 0.8);
+            top: 0;
+            left: 0;
+            display: none;
+            animation: scan 2s linear infinite;
+            z-index: 5;
+        }
+
+        @keyframes scan {
+            0% { top: 0; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+
+        /* --- 標籤與進度條 --- */
+        #label-container {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .label-row {
+            background: #f8f9fa;
+            padding: 10px 15px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        .label-info {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            flex-grow: 1;
+            margin-right: 15px;
+        }
+
+        .class-name {
+            font-weight: bold;
+            font-size: 0.9rem;
+            color: var(--primary-green);
+        }
+
+        .progress-bg {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            margin-top: 6px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--accent-green);
+            width: 0%;
+            transition: width 0.2s ease;
+            border-radius: 4px;
+        }
+
+        .probability-text {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #666;
+            min-width: 45px;
+            text-align: right;
+        }
+        
+        .loader {
+            display: none;
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: var(--primary-green);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="leaf-bg leaf-1"></div>
+    <div class="leaf-bg leaf-2"></div>
+
+    <div class="main-card">
+        <h1>🌿 植物 AI 診斷</h1>
+        <p class="subtitle">將鏡頭對準植物，即時分析健康狀況</p>
+        
+        <button type="button" onclick="init()" class="start-btn" id="start-btn">
+            <span>📷 啟動相機</span>
+        </button>
+        <div class="loader" id="loader">模型載入中...</div>
+
+        <div id="webcam-container">
+            <span style="color: #999; font-size: 0.8rem;">等待相機啟動...</span>
+            <div class="scan-line" id="scan-line"></div>
+        </div>
+        
+        <div id="label-container"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <script type="text/javascript">
+        // --- 設定你的模型路徑 ---
+        // 請確保你的資料夾名稱為 my_model 且與此 HTML 檔案在同一層目錄
+        const URL = "./my_model/";
+
+        let model, webcam, labelContainer, maxPredictions;
+
+        async function init() {
+            const startBtn = document.getElementById("start-btn");
+            const loader = document.getElementById("loader");
+            
+            // UI 狀態更新
+            startBtn.style.display = "none";
+            loader.style.display = "block";
+
+            try {
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                const flip = true; 
+                webcam = new tmImage.Webcam(200, 200, flip); 
+                await webcam.setup(); 
+                await webcam.play();
+                window.requestAnimationFrame(loop);
+
+                // UI 更新：清除預設文字，加入 Canvas
+                const webcamContainer = document.getElementById("webcam-container");
+                webcamContainer.innerHTML = ""; 
+                webcamContainer.appendChild(webcam.canvas);
+                
+                // 啟動掃描線動畫
+                document.getElementById("webcam-container").appendChild(document.createElement("div")).className = "scan-line";
+                document.querySelector(".scan-line").style.display = "block";
+                
+                loader.style.display = "none";
+
+                // 初始化標籤與進度條結構
+                labelContainer = document.getElementById("label-container");
+                for (let i = 0; i < maxPredictions; i++) {
+                    // 創建美觀的進度條 HTML 結構
+                    const row = document.createElement("div");
+                    row.className = "label-row";
+                    
+                    const infoDiv = document.createElement("div");
+                    infoDiv.className = "label-info";
+                    
+                    const nameSpan = document.createElement("span");
+                    nameSpan.className = "class-name";
+                    
+                    const progressBg = document.createElement("div");
+                    progressBg.className = "progress-bg";
+                    
+                    const progressFill = document.createElement("div");
+                    progressFill.className = "progress-fill";
+                    
+                    const probText = document.createElement("span");
+                    probText.className = "probability-text";
+                    
+                    // 組裝
+                    progressBg.appendChild(progressFill);
+                    infoDiv.appendChild(nameSpan);
+                    infoDiv.appendChild(progressBg);
+                    row.appendChild(infoDiv);
+                    row.appendChild(probText);
+                    
+                    labelContainer.appendChild(row);
+                }
+            } catch (e) {
+                alert("無法載入模型，請確認 ./my_model/ 資料夾是否存在且包含 model.json");
+                loader.style.display = "none";
+                startBtn.style.display = "inline-flex";
+            }
+        }
+
+        async function loop() {
+            webcam.update(); 
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
+
+        async function predict() {
+            const prediction = await model.predict(webcam.canvas);
+            const labelRows = labelContainer.childNodes;
+
+            for (let i = 0; i < maxPredictions; i++) {
+                const probability = prediction[i].probability;
+                const percent = (probability * 100).toFixed(0) + "%";
+                const className = prediction[i].className;
+
+                // 取得對應的 DOM 元素
+                const row = labelRows[i];
+                const nameSpan = row.querySelector(".class-name");
+                const barFill = row.querySelector(".progress-fill");
+                const probText = row.querySelector(".probability-text");
+
+                // 更新內容
+                nameSpan.innerText = className;
+                barFill.style.width = percent;
+                probText.innerText = percent;
+
+                // 動態顏色：信心度高變成深綠，低則變淺
+                if (probability > 0.8) {
+                    barFill.style.backgroundColor = "#2d6a4f"; // 深綠
+                } else if (probability > 0.5) {
+                    barFill.style.backgroundColor = "#52b788"; // 中綠
+                } else {
+                    barFill.style.backgroundColor = "#b7e4c7"; // 淺綠
+                }
+            }
+        }
+    </script>
+</body>
+</html>ipt>
+
